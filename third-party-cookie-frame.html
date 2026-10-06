@@ -1,5 +1,24 @@
 <html>
 
+<head>
+    <script>
+        // Pendo agent, with 'track' stubbed so calls made before it loads are queued.
+        (function (apiKey) {
+            (function(p,e,n,d,o){var v,w,x,y,z;o=p[d]=p[d]||{};o._q=[];
+                v=['initialize','identify','updateOptions','pageLoad','track'];for(w=0,x=v.length;w<x;++w)(function(m){
+                    o[m]=o[m]||function(){o._q[m===v[0]?'unshift':'push']([m].concat([].slice.call(arguments,0)));};})(v[w]);
+                y=e.createElement(n);y.async=!0;y.src='https://pendo-dev-static.storage.googleapis.com/agent/static/'+apiKey+'/pendo.js';
+                z=e.getElementsByTagName(n)[0];z.parentNode.insertBefore(y,z);})(window,document,'script','pendo');
+
+            pendo.initialize({
+                visitor: {
+                    id: new URLSearchParams(window.location.search).get('visitor') || 'testuser@pendo'
+                }
+            });
+        })('4c7e0603-698d-4cb5-570e-c2e5f321433c');
+    </script>
+</head>
+
 <body>
     <button id="generate-handles">generate storage handles</button>
     <div id="ls-last-check-timestamp"></div>
@@ -16,17 +35,48 @@
         const rsaStorageBtn = document.getElementById('rsa-storage');
 
         let rsaHandle;
+        // Latest result of the hasStorageAccess() poll below; null until the first check.
+        let lastHasAccess = null;
 
         window.setInterval(() => {
             lsLastCheckTimestamp.innerText = `Last checked: ${new Date().toLocaleTimeString()}`;
             document.hasStorageAccess().then(result => {
+                lastHasAccess = result;
                 hasStorageAccess.innerText = `Has storage access: ${result}`;
             });
         }, 1000);
 
+        // Internal RSA diagnostic event. Tracking must never break the page.
+        const trackStorageAccessRequested = (properties) => {
+            try {
+                if (window.pendo && typeof window.pendo.track === 'function') {
+                    window.pendo.track('storage_access_requested', properties);
+                }
+            } catch (err) {
+                console.warn('Pendo track failed: storage_access_requested', err);
+            }
+        };
+
         generateHandlesBtn.addEventListener('click', async () => {
-            rsaHandle = await document.requestStorageAccess({ all: true });
+            // Gathered synchronously: requestStorageAccess() must stay the first
+            // await so it still runs within the user gesture.
+            const properties = {
+                requested_types: 'all',
+                source_page: 'third-party-cookie-frame',
+                is_embedded: window.self !== window.top
+            };
+            if (lastHasAccess !== null) {
+                properties.had_storage_access_before = lastHasAccess;
+            }
+            try {
+                rsaHandle = await document.requestStorageAccess({ all: true });
+            } catch (err) {
+                trackStorageAccessRequested({ ...properties, outcome: 'denied', error_name: err && err.name });
+                // Re-throw so the rejection still shows up in the console as before.
+                throw err;
+            }
             rsaStorageBtn.removeAttribute('disabled');
+            trackStorageAccessRequested({ ...properties, outcome: 'granted' });
         });
 
         windowStorageBtn.addEventListener('click', () => {
