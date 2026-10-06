@@ -13,7 +13,7 @@
     <script>
 		(function(apiKey){
 			(function(p,e,n,d,o){var v,w,x,y,z;o=p[d]=p[d]||{};o._q=[];
-				v=['initialize','identify','updateOptions','pageLoad'];for(w=0,x=v.length;w<x;++w)(function(m){
+				v=['initialize','identify','updateOptions','pageLoad','track'];for(w=0,x=v.length;w<x;++w)(function(m){
 					o[m]=o[m]||function(){o._q[m===v[0]?'unshift':'push']([m].concat([].slice.call(arguments,0)));};})(v[w]);
 				y=e.createElement(n);y.async=!0;y.src='https://pendo-dev-static.storage.googleapis.com/agent/static/'+apiKey+'/pendo.js';
 				z=e.getElementsByTagName(n)[0];z.parentNode.insertBefore(y,z);})(window,document,'script','pendo');
@@ -104,5 +104,61 @@
         </div><!--/.col-*-->
       </div><!--/.row-->
     </div><!--/.container-->
+    <script>
+      // Pendo Track Events
+      (function ($) {
+        // Tracking must never break the page, so failures are only logged.
+        function trackPendoEvent(name, properties) {
+          try {
+            if (window.pendo && typeof window.pendo.track === 'function') {
+              window.pendo.track(name, properties);
+            }
+          } catch (err) {
+            console.warn('Pendo track failed: ' + name, err);
+          }
+        }
+
+        // Send queued events now. flushNow only exists once the agent has loaded,
+        // and { unload: true } uses a request that survives page navigation.
+        function flushPendoEvents() {
+          try {
+            if (window.pendo && typeof window.pendo.flushNow === 'function') {
+              window.pendo.flushNow({ unload: true });
+            }
+          } catch (err) {
+            console.warn('Pendo flush failed', err);
+          }
+        }
+
+        // A double-click can submit the form twice before the page unloads, so
+        // record at most one login per page view.
+        var loginTracked = false;
+
+        // user_logged_in: the prototype has no credential validation, so every
+        // submit is a successful login. Once real authentication exists, move
+        // this into the auth-success callback. Only report whether the fields
+        // were filled in, never their values.
+        $(document).on('submit', 'form.form-horizontal', function () {
+          if (loginTracked) {
+            return;
+          }
+          loginTracked = true;
+          trackPendoEvent('user_logged_in', {
+            remember_username: $(this).find('input[type=checkbox]').is(':checked'),
+            username_provided: $.trim($('#inputUsername').val()).length > 0,
+            password_provided: $('#inputPassword').val().length > 0
+          });
+          // The form navigates to index.html immediately.
+          flushPendoEvents();
+        });
+
+        // A page restored from the back/forward cache keeps its script state.
+        window.addEventListener('pageshow', function (e) {
+          if (e.persisted) {
+            loginTracked = false;
+          }
+        });
+      })(jQuery);
+    </script>
   </body>
 </html>

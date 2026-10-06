@@ -13,7 +13,7 @@
     <script>
 		(function(apiKey){
 			(function(p,e,n,d,o){var v,w,x,y,z;o=p[d]=p[d]||{};o._q=[];
-				v=['initialize','identify','updateOptions','pageLoad'];for(w=0,x=v.length;w<x;++w)(function(m){
+				v=['initialize','identify','updateOptions','pageLoad','track'];for(w=0,x=v.length;w<x;++w)(function(m){
 					o[m]=o[m]||function(){o._q[m===v[0]?'unshift':'push']([m].concat([].slice.call(arguments,0)));};})(v[w]);
 				y=e.createElement(n);y.async=!0;y.src='https://pendo-dev-static.storage.googleapis.com/agent/static/'+apiKey+'/pendo.js';
 				z=e.getElementsByTagName(n)[0];z.parentNode.insertBefore(y,z);})(window,document,'script','pendo');
@@ -694,6 +694,114 @@
       });
 
     });
+  </script>
+  <script>
+    // Pendo Track Events for the resource cards.
+    // The toolbar is still static mock markup with no filter, search or action
+    // logic behind it, so each event fires when the user acts and reads its
+    // counts from the page as rendered. Once that logic exists, fire these after
+    // it has updated the page (for actions, from the success callback).
+    (function ($) {
+      var VIEW_TYPE = 'card';
+
+      // Tracking must never break the page, so failures are only logged.
+      function trackPendoEvent(name, properties) {
+        try {
+          if (window.pendo && typeof window.pendo.track === 'function') {
+            window.pendo.track(name, properties);
+          }
+        } catch (err) {
+          console.warn('Pendo track failed: ' + name, err);
+        }
+      }
+
+      // Trim and cap free text so properties stay within Pendo's size limits.
+      function truncateText(text) {
+        return $.trim(text).substring(0, 100);
+      }
+
+      // Enter key, ignoring auto-repeat while it is held down.
+      function isEnterKey(e) {
+        return e.which === 13 && !(e.originalEvent && e.originalEvent.repeat);
+      }
+
+      // Results header, e.g. '40 Results' -> 40.
+      function getResultsCount() {
+        var count = parseInt($('.toolbar-pf-results h5').text(), 10);
+        return isNaN(count) ? undefined : count;
+      }
+
+      function getActiveFilterCount() {
+        return $('.toolbar-pf-results .label-info').length;
+      }
+
+      // resource_list_filtered: filterAction is 'applied', 'removed' or 'cleared_all'.
+      function trackFilterChange(filterAction, field, value) {
+        var properties = {
+          filter_action: filterAction,
+          active_filter_count: getActiveFilterCount(),
+          results_count: getResultsCount(),
+          view_type: VIEW_TYPE
+        };
+        if (field) {
+          properties.filter_field = truncateText(field);
+        }
+        if (value) {
+          properties.filter_value = truncateText(value);
+        }
+        trackPendoEvent('resource_list_filtered', properties);
+      }
+
+      // Filter applied: Enter in the 'Filter By Name...' input.
+      $(document).on('keydown', '#filter', function (e) {
+        var value = $.trim($(this).val());
+        if (isEnterKey(e) && value) {
+          trackFilterChange('applied', $('.toolbar-pf-filter .dropdown-toggle').text(), value);
+        }
+      });
+
+      // Filter removed: the close icon on an active filter chip ('Name: value').
+      $(document).on('click', '.toolbar-pf-results .label-info a', function () {
+        var chip = $.trim($(this).closest('.label-info').text());
+        var separator = chip.indexOf(':');
+        trackFilterChange('removed', chip.substring(0, separator), chip.substring(separator + 1));
+      });
+
+      // All filters cleared: the 'Clear All Filters' link.
+      $(document).on('click', '.toolbar-pf-results p > a', function () {
+        trackFilterChange('cleared_all');
+      });
+
+      // resource_keyword_searched: once per executed search (Enter), not per
+      // keystroke. Opening or closing the find panel is not a search.
+      $(document).on('keydown', '#find', function (e) {
+        var keyword = $.trim($(this).val());
+        if (!isEnterKey(e) || !keyword) {
+          return;
+        }
+        // Match counter, e.g. '1 of 3' -> 3.
+        var total = ($('.find-pf-nums').text().match(/of\s+(\d+)/) || [])[1];
+        trackPendoEvent('resource_keyword_searched', {
+          keyword: truncateText(keyword),
+          match_count: total ? parseInt(total, 10) : 0,
+          active_filter_count: getActiveFilterCount(),
+          view_type: VIEW_TYPE
+        });
+      });
+
+      // resource_bulk_action_performed: a toolbar Action button or kebab menu
+      // item, applied to the cards selected with the checkboxes.
+      $(document).on('click', '.toolbar-pf-actions .form-group > .btn-default, [aria-labelledby="dropdownKebab"] a', function () {
+        var $action = $(this);
+        trackPendoEvent('resource_bulk_action_performed', {
+          action_name: truncateText($action.text()),
+          action_source: $action.is('a') ? 'toolbar_kebab' : 'toolbar_button',
+          selected_count: $('.card-pf.active').length,
+          total_results: getResultsCount(),
+          view_type: VIEW_TYPE
+        });
+      });
+    })(jQuery);
   </script>
   </body>
 </html>
